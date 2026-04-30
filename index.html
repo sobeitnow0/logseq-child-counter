@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <script src="https://cdn.jsdelivr.net/npm/@logseq/libs"></script>
+</head>
+<body>
+  <script>
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    const processingBlocks = new Set();
+
+    function injectStyles() {
+      const doc = window.parent.document;
+      if (!doc.getElementById('logseq-child-counter-styles')) {
+        const style = doc.createElement('style');
+        style.id = 'logseq-child-counter-styles';
+        style.innerHTML = `
+          .logseq-child-counter {
+            font-family: 'Inter', 'Google Sans Flex', sans-serif;
+            font-size: 0.8em;
+            color: #9CA3AF; /* Cor única e unificada para todos */
+            font-weight: 600;
+            user-select: none;
+            margin-left: 6px;
+            display: inline;
+            cursor: pointer;
+            transition: opacity 0.2s ease, filter 0.2s ease;
+          }
+          .logseq-child-counter:hover {
+            opacity: 1 !important;
+            filter: brightness(0.8); /* Fica um pouquinho mais escuro ao passar o mouse */
+          }
+        `;
+        doc.head.appendChild(style);
+      }
+    }
+
+    async function updateCounter(uuid) {
+      if (processingBlocks.has(uuid)) return;
+      processingBlocks.add(uuid);
+
+      try {
+        const doc = window.parent.document;
+        
+        const blockEl = doc.querySelector(`[blockid="${uuid}"]`);
+        if (!blockEl) return;
+
+        const textContainer = blockEl.querySelector('.block-content-inner .inline');
+        if (!textContainer) return; 
+
+        const existingCounter = blockEl.querySelector('.logseq-child-counter');
+        if (existingCounter) existingCounter.remove();
+
+        const block = await logseq.Editor.getBlock(uuid, { includeChildren: true });
+        if (!block || !block.children || block.children.length === 0) return;
+
+        const validChildren = block.children.filter(child => {
+          const hasText = child.content !== undefined ? child.content.trim() !== '' : true;
+          const hasDescendants = child.children && child.children.length > 0;
+          return hasText || hasDescendants;
+        });
+
+        if (validChildren.length === 0) return;
+
+        const directCount = validChildren.length;
+        const hasDescendants = validChildren.some(child => child.children && child.children.length > 0);
+        
+
+        const displayText = `(${hasDescendants ? directCount + '+' : directCount})`;
+
+
+        const isCollapsed = block['collapsed?'] === true;
+        const opacity = isCollapsed ? '1' : '0.25';
+
+        const span = doc.createElement('span');
+        span.className = 'logseq-child-counter';
+        span.textContent = displayText;
+        span.style.opacity = opacity;
+
+        span.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+        });
+
+        span.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          const blockInfo = await logseq.Editor.getBlock(uuid);
+          if (blockInfo) {
+            const isCurrentlyCollapsed = blockInfo['collapsed?'] === true;
+            await logseq.Editor.setBlockCollapsed(uuid, !isCurrentlyCollapsed);
+            span.style.opacity = !isCurrentlyCollapsed ? '1' : '0.25';
+          }
+        });
+
+        textContainer.appendChild(span);
+
+      } catch (e) {
+        console.error("Error updating block counter:", e);
+      } finally {
+        processingBlocks.delete(uuid);
+      }
+    }
+
+    async function scanAllVisibleBlocks() {
+      const doc = window.parent.document;
+      const blocks = doc.querySelectorAll('.ls-block');
+      for (const block of blocks) {
+        const uuid = block.getAttribute('blockid');
+        if (uuid) updateCounter(uuid);
+      }
+    }
+
+    function setupDOMObserver() {
+      const doc = window.parent.document;
+      const appContainer = doc.getElementById('app-container') || doc.body;
+
+      const observer = new MutationObserver((mutations) => {
+        const uuidsToUpdate = new Set();
+        for (const mutation of mutations) {
+          mutation.addedNodes.forEach(node => {
+            if (node.nodeType === 1) { 
+              if (node.classList.contains('ls-block')) {
+                const uuid = node.getAttribute('blockid');
+                if (uuid) uuidsToUpdate.add(uuid);
+              }
+              const innerBlocks = node.querySelectorAll('.ls-block');
+              innerBlocks.forEach(b => {
+                const uuid = b.getAttribute('blockid');
+                if (uuid) uuidsToUpdate.add(uuid);
+              });
+            }
+          });
+        }
+        uuidsToUpdate.forEach(uuid => updateCounter(uuid));
+      });
+      observer.observe(appContainer, { childList: true, subtree: true });
+    }
+
+    async function main() {
+      console.log("Child Counter Plugin v2.1 - Clareza Focada");
+
+      injectStyles(); 
+      await sleep(1000); 
+      await scanAllVisibleBlocks();
+      
+      setupDOMObserver();
+
+      logseq.DB.onChanged(async (e) => {
+        for (const block of e.blocks) {
+          await updateCounter(block.uuid);
+          if (block.parent && block.parent.id) {
+            const parentBlock = await logseq.Editor.getBlock(block.parent.id);
+            if (parentBlock) await updateCounter(parentBlock.uuid);
+          }
+        }
+      });
+    }
+
+    logseq.ready(main).catch(console.error);
+  </script>
+</body>
+</html>
