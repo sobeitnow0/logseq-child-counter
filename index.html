@@ -36,12 +36,11 @@
     }
 
     async function updateCounter(uuid) {
-      if (processingBlocks.has(uuid)) return;
+      if (processingBlocks.has(uuid)) return; // evita loops
       processingBlocks.add(uuid);
 
       try {
         const doc = window.parent.document;
-        
         const blockEl = doc.querySelector(`[blockid="${uuid}"]`);
         if (!blockEl) return;
 
@@ -64,10 +63,8 @@
 
         const directCount = validChildren.length;
         const hasDescendants = validChildren.some(child => child.children && child.children.length > 0);
-        
 
         const displayText = `(${hasDescendants ? directCount + '+' : directCount})`;
-
 
         const isCollapsed = block['collapsed?'] === true;
         const opacity = isCollapsed ? '1' : '0.25';
@@ -131,9 +128,18 @@
               });
             }
           });
+          mutation.removedNodes.forEach(node => {
+            if (node.nodeType === 1) {
+              if (node.classList.contains('ls-block')) {
+                const uuid = node.getAttribute('blockid');
+                if (uuid) uuidsToUpdate.add(uuid);
+              }
+            }
+          });
         }
         uuidsToUpdate.forEach(uuid => updateCounter(uuid));
       });
+
       observer.observe(appContainer, { childList: true, subtree: true });
     }
 
